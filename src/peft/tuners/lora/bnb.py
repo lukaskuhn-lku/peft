@@ -55,6 +55,7 @@ if is_bnb_available():
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
             """
+            #TODO: this needs to be changed for qa-lora based on if quantization-awareness is enabled or not
             if self.merged:
                 warnings.warn(
                     f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -97,6 +98,7 @@ if is_bnb_available():
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
+            #TODO: this needs to be changed for qa-lora based on if quantization-awareness is enabled or not
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
@@ -161,6 +163,11 @@ if is_bnb_available():
                         compute_dtype = lora_A.weight.dtype
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
+                    """
+                        TODO: Changing the implementation based on if qa is enabled or not
+                        
+                        output = lora_B(lora_A(dropout(qa_pool(x) * group_size)))
+                    """
                     output = lora_B(lora_A(dropout(x)))
                     if requires_conversion:
                         output = output.to(expected_dtype)
@@ -201,6 +208,7 @@ if is_bnb_4bit_available():
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
             """
+            #TODO: this needs to be changed for qa-lora based on if quantization-awareness is enabled or not
             if self.merged:
                 warnings.warn(
                     f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -230,6 +238,7 @@ if is_bnb_4bit_available():
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
+            #TODO: this needs to be changed for qa-lora based on if quantization-awareness is enabled or not
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
@@ -287,6 +296,11 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         x = x.to(lora_A.weight.dtype)
 
+                    """
+                    TODO: Changing the implementation based on if qa is enabled or not
+                    
+                    output = lora_B(lora_A(dropout(qa_pool(x) * group_size)))
+                    """
                     output = lora_B(lora_A(dropout(x)))
                     if requires_conversion:
                         output = output.to(expected_dtype)
