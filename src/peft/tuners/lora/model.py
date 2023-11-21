@@ -47,7 +47,7 @@ if is_bnb_available():
     from .bnb import Linear8bitLt
 
 if is_bnb_4bit_available():
-    from .bnb import Linear4bit
+    from .bnb import Linear4bit, QALinear4bit
 
 
 class LoraModel(BaseTuner):
@@ -414,7 +414,7 @@ class LoraModel(BaseTuner):
                     )
                 elif is_bnb_4bit_available() and isinstance(target, Linear4bit):
                     bias = target.base_layer.bias is not None
-                    new_module = bnb.nn.Linear4bit(
+                    new_module = QALinear4bit(
                         target.in_features,
                         target.out_features,
                         bias=bias,

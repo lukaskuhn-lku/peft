@@ -51,8 +51,8 @@ model = AutoModelForCausalLM.from_pretrained(
         llm_int8_threshold=6.0,
         llm_int8_has_fp16_weight=False,
         bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=False,
+        bnb_4bit_quant_type="fp4",
     ),
     torch_dtype=torch.float16,
 )
@@ -145,8 +145,8 @@ trainer = transformers.Trainer(
     args=transformers.TrainingArguments(
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,
-        warmup_steps=10,
-        max_steps=20,
+        warmup_steps=0,
+        max_steps=500,
         learning_rate=3e-4,
         fp16=True,
         logging_steps=1,
@@ -187,12 +187,17 @@ You can also directly load adapters from the Hub using the commands below:
 #
 batch = tokenizer("Two things are infinite: ", return_tensors="pt")
 
+#merged_model = model
+model = model.merge_and_unload()
 model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
 model.eval()
+
 with torch.cuda.amp.autocast():
     output_tokens = model.generate(**batch, max_new_tokens=50)
 
 print("\n\n", tokenizer.decode(output_tokens[0], skip_special_tokens=True))
-# model.save('./test.pt')
+
+
+#model.save('./test.pt')
 
 # """As you can see by fine-tuning for few steps we have almost recovered the quote from Albert Einstein that is present in the [training data](https://huggingface.co/datasets/Abirate/english_quotes)."""

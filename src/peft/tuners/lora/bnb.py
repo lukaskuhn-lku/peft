@@ -23,6 +23,7 @@ from peft.utils.other import transpose
 
 from .layer import LoraLayer
 
+from torch import nn
 
 if is_bnb_available():
 
@@ -191,12 +192,14 @@ if is_bnb_4bit_available():
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, in_features=base_layer.in_features, out_features=base_layer.out_features)
+            self.block_size = base_layer.weight.quant_state[3] # maybe access this better
+            LoraLayer.__init__(self, in_features=base_layer.in_features//self.block_size, out_features=base_layer.out_features)
             self.base_layer = base_layer
 
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.set_adapter(adapter_name)
+            self.qa_pool = torch.nn.AvgPool1d(self.block_size)
 
         def merge(self, safe_merge: bool = False):
             """
@@ -208,7 +211,6 @@ if is_bnb_4bit_available():
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
             """
-            #TODO: this needs to be changed for qa-lora based on if quantization-awareness is enabled or not
             if self.merged:
                 warnings.warn(
                     f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -226,19 +228,25 @@ if is_bnb_4bit_available():
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
 
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                shape = self.base_layer.weight.quant_state[1]
+                c = (127 / weight.quant_state[0]).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
+                lora_full = lora_data.view(-1).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
+
+                w_unmerged = bnb.functional.dequantize_4bit(weight.data, weight.quant_state)
+                w_and_lora = (w_unmerged + lora_full) * c
+                w_data = torch.round(w_and_lora)
+
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
-                self.base_layer.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    weight.device
-                )
+                self.base_layer.weight.data = w_data
+                self.base_layer.weight.quant_state.append(c)
+                
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
-            #TODO: this needs to be changed for qa-lora based on if quantization-awareness is enabled or not
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
@@ -296,15 +304,67 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         x = x.to(lora_A.weight.dtype)
 
-                    """
-                    TODO: Changing the implementation based on if qa is enabled or not
-                    
-                    output = lora_B(lora_A(dropout(qa_pool(x) * group_size)))
-                    """
-                    output = lora_B(lora_A(dropout(x)))
+
+                    output = lora_B(lora_A(dropout(self.qa_pool(x) * self.block_size)))
                     if requires_conversion:
                         output = output.to(expected_dtype)
                     output = output * scaling
                     result += output
 
             return result
+
+    class QALinear4bit(nn.Linear):
+        def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4', device=None):
+            super().__init__(input_features, output_features, bias, device)
+            self.weight = torch.nn.Parameter(self.weight.data)
+            self.compute_dtype = compute_dtype
+            self.compute_type_is_set = False
+
+        def set_compute_type(self, x):
+            if x.dtype in [torch.float32, torch.bfloat16]:
+                # the input is in a dtype that is safe to compute in, we switch
+                # to this type for speed and stability
+                self.compute_dtype = x.dtype
+            elif x.dtype == torch.float16:
+                # we take the compoute dtype passed into the layer
+                if self.compute_dtype == torch.float32 and (x.numel() == x.shape[-1]):
+                    # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference when it could be fast
+                    # warn the user about this
+                    warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference.')
+                    warnings.filterwarnings('ignore', message='.*inference.')
+                if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
+                    warnings.warn(f'Input type into Linear4bit is torch.float16, but bnb_4bit_compute_type=torch.float32 (default). This will lead to slow inference or training speed.')
+                    warnings.filterwarnings('ignore', message='.*inference or training')
+
+        def _save_to_state_dict(self, destination, prefix, keep_vars):
+            """
+            save weight and bias,
+            then fill state_dict with components of quant_state
+            """
+            super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
+
+            if getattr(self.weight, "quant_state", None) is not None:
+                for k, v in self.weight.quant_state.as_dict(packed=True).items():
+                    destination[prefix + "weight." + k] = v if keep_vars else v.detach()
+
+        def forward(self, x: torch.Tensor):
+            # weights are cast automatically as Int8Params, but the bias has to be cast manually
+            if self.bias is not None and self.bias.dtype != x.dtype:
+                self.bias.data = self.bias.data.to(x.dtype)
+
+            if getattr(self.weight, 'quant_state', None) is None:
+                print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+            if not self.compute_type_is_set:
+                self.set_compute_type(x)
+                self.compute_type_is_set = True
+
+            inp_dtype = x.dtype
+            if self.compute_dtype is not None:
+                x = x.to(self.compute_dtype)
+
+            bias = None if self.bias is None else self.bias.to(self.compute_dtype)
+            out = x @ (self.weight / self.weight.quant_state[7]).T.to(self.compute_dtype) + bias 
+
+            out = out.to(inp_dtype)
+
+            return out
