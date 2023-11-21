@@ -117,6 +117,15 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    quantization_awareness: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to enable quantization awareness for the layers."
+                "This is only used when quantizing weights with 4-bit precision."
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
