@@ -240,11 +240,14 @@ if is_bnb_4bit_available():
 
                 if self.qa:
                     shape = self.base_layer.weight.quant_state[1]
+                    # Create full size c and full size lora (dimensions of base_layer)
                     c = (127 / weight.quant_state[0]).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
-                    lora_full = lora_data.view(-1).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
+                    lora_fullsize = lora_data.view(-1).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
 
-                    w_unmerged = bnb.functional.dequantize_4bit(weight.data, weight.quant_state, quant_type=kwargs['quant_type'])
-                    w_and_lora = (w_unmerged + lora_full) * c
+                    w_dequantized = bnb.functional.dequantize_4bit(weight.data, weight.quant_state, quant_type=kwargs['quant_type'])
+
+                    # Implementation of QLora quantization technique with QALora awareness
+                    w_and_lora = (w_dequantized + lora_fullsize) * c
                     w_data = torch.round(w_and_lora)
                 else:
                     w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
@@ -255,8 +258,8 @@ if is_bnb_4bit_available():
                     )
 
                 if self.qa:
+                    # Set base_layer weights to new data and use that in QALinear4Bit layer
                     self.base_layer.weight.data = w_data
-                    #self.base_layer.weight.quant_state.append(c)
                 else:
                     self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                         weight.device
