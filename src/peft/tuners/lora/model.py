@@ -276,6 +276,7 @@ class LoraModel(BaseTuner):
                     "compute_dtype": target.compute_dtype,
                     "compress_statistics": target.weight.compress_statistics,
                     "quant_type": target.weight.quant_type,
+                    "quantization_awareness": lora_config.quantization_awareness,
                 }
             )
             new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)

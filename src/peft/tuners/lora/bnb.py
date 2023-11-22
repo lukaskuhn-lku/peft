@@ -194,6 +194,13 @@ if is_bnb_4bit_available():
             **kwargs,
         ) -> None:
             super().__init__()
+
+            self.qa = kwargs["quantization_awareness"]
+            if self.qa:
+                self.block_size = 64 # BNB4bit uses 64 block size
+                self.qa_pool = torch.nn.AvgPool1d(self.block_size) 
+                base_layer.in_features = base_layer.in_features // self.block_size 
+
             LoraLayer.__init__(self, base_layer)
 
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
@@ -231,15 +238,30 @@ if is_bnb_4bit_available():
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
 
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                if self.qa:
+                    shape = self.base_layer.weight.quant_state[1]
+                    c = (127 / weight.quant_state[0]).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
+                    lora_full = lora_data.view(-1).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
+
+                    w_unmerged = bnb.functional.dequantize_4bit(weight.data, weight.quant_state, quant_type=kwargs['quant_type'])
+                    w_and_lora = (w_unmerged + lora_full) * c
+                    w_data = torch.round(w_and_lora)
+                else:
+                    w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    weight.device
-                )
+                if self.qa:
+                    self.base_layer.weight.data = w_data
+                    self.base_layer.weight.quant_state.append(c)
+                else:
+                    self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                        weight.device
+                    )
+
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
@@ -299,6 +321,9 @@ if is_bnb_4bit_available():
                     if requires_conversion:
                         expected_dtype = result.dtype
                         x = x.to(lora_A.weight.dtype)
+
+                    if self.qa:
+                        x = self.qa_pool(x) * self.block_size
 
                     output = lora_B(lora_A(dropout(x)))
                     if requires_conversion:
