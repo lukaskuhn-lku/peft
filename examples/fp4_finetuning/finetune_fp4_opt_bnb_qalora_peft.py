@@ -51,8 +51,8 @@ model = AutoModelForCausalLM.from_pretrained(
         llm_int8_threshold=6.0,
         llm_int8_has_fp16_weight=False,
         bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="fp4",
+        bnb_4bit_use_double_quant=False,
+        bnb_4bit_quant_type="nf4",
     ),
     torch_dtype=torch.float16,
 )
