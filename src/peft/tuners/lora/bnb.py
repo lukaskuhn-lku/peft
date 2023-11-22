@@ -256,7 +256,7 @@ if is_bnb_4bit_available():
 
                 if self.qa:
                     self.base_layer.weight.data = w_data
-                    self.base_layer.weight.quant_state.append(c)
+                    #self.base_layer.weight.quant_state.append(c)
                 else:
                     self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                         weight.device
@@ -377,7 +377,10 @@ if is_bnb_4bit_available():
                 self.bias.data = self.bias.data.to(x.dtype)
 
             if getattr(self.weight, 'quant_state', None) is None:
-                print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+                raise ValueError(
+                    f"No quantization state found for weight of layer {self.__class__.__name__}. "
+                )
+            
             if not self.compute_type_is_set:
                 self.set_compute_type(x)
                 self.compute_type_is_set = True
@@ -387,7 +390,8 @@ if is_bnb_4bit_available():
                 x = x.to(self.compute_dtype)
 
             bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-            out = x @ (self.weight / self.weight.quant_state[7]).T.to(self.compute_dtype) + bias 
+            c = (127 / self.weight.quant_state[0]).view(self.weight.shape[0], self.weight.shape[1]//self.weight.quant_state[3]).unsqueeze(2).expand(-1, -1, 64).reshape(self.weight.shape[0], self.weight.shape[1])
+            out = x @ (self.weight / c).T.to(self.compute_dtype) + bias 
 
             out = out.to(inp_dtype)
 
