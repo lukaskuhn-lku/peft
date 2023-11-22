@@ -272,6 +272,9 @@ if is_bnb_4bit_available():
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
 
+            if self.qa:
+                raise NotImplementedError("Unmerge is not supported for QALora.")
+
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter not in self.lora_A.keys():
