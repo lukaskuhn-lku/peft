@@ -254,6 +254,60 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
     @pytest.mark.single_gpu_tests
+    def test_lora_bnb_4bit_quantization_qa(self):
+        r"""
+        Test that tests if the 4bit quantization using LoRA works as expected
+        """
+        whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            load_in_4bit=True,
+        )
+
+        opt_4bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            load_in_4bit=True,
+        )
+
+        flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            load_in_4bit=True,
+        )
+
+        flan_lora_config = LoraConfig(
+            r=16, lora_alpha=32, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM", quantization_awareness=True,
+        )
+
+        opt_lora_config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            quantization_awareness=True,
+        )
+
+        config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none", quantization_awareness=True,)
+
+        flan_4bit = get_peft_model(flan_4bit, flan_lora_config)
+        self.assertTrue(
+            isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear4bit)
+        )
+
+        opt_4bit = get_peft_model(opt_4bit, opt_lora_config)
+        self.assertTrue(isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit))
+
+        whisper_4bit = get_peft_model(whisper_4bit, config)
+        self.assertTrue(
+            isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+        )
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
     def test_ia3_bnb_4bit_quantization(self):
         r"""
         Test that tests if the 4bit quantization using IA3 works as expected
@@ -440,6 +494,34 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
         self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_print_4bit_expected(self):
+        EXPECTED_TRAINABLE_PARAMS = 149760
+        EXPECTED_ALL_PARAMS = 125389056
+    
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+        )
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+        )
+
+        config = LoraConfig(
+            r=8,
+            quantization_awareness=True,
+        )
+        model = get_peft_model(model, config)
+        trainable_params, all_params = model.get_nb_trainable_parameters()
+
+        self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
+        self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
+
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
