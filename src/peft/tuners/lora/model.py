@@ -392,6 +392,9 @@ class LoraModel(BaseTuner):
 
                 base_layer = target.get_base_layer() 
                 if isinstance(target, Linear4bit) and self.model.peft_config["default"].quantization_awareness:
+                    if self.model.config.quantization_config.bnb_4bit_use_double_quant:
+                        raise NotImplementedError("Cannot currently merge models using double quantization with quantization_awareness=True")
+
                     bias = target.base_layer.bias is not None
                     base_layer = QALinear4bit(
                         target.in_features,
