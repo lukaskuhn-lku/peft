@@ -364,15 +364,7 @@ if is_bnb_4bit_available():
                     warnings.filterwarnings('ignore', message='.*inference or training')
 
         def _save_to_state_dict(self, destination, prefix, keep_vars):
-            """
-            save weight and bias,
-            then fill state_dict with components of quant_state
-            """
-            super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
-
-            if getattr(self.weight, "quant_state", None) is not None:
-                for k, v in self.weight.quant_state.as_dict(packed=True).items():
-                    destination[prefix + "weight." + k] = v if keep_vars else v.detach()
+            raise NotImplementedError("Saving a merged quantized checkpoint is not supported for QALora")
 
         def forward(self, x: torch.Tensor):
             # weights are cast automatically as Int8Params, but the bias has to be cast manually
