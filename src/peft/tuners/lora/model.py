@@ -47,7 +47,7 @@ if is_bnb_available():
     from .bnb import Linear8bitLt
 
 if is_bnb_4bit_available():
-    from .bnb import Linear4bit
+    from .bnb import Linear4bit, QALinear4bit
 
 
 class LoraModel(BaseTuner):
@@ -388,7 +388,21 @@ class LoraModel(BaseTuner):
             if hasattr(target, "base_layer"):
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                self._replace_module(parent, target_name, target.get_base_layer(), target)
+
+                base_layer = target.get_base_layer() 
+                if isinstance(target, Linear4bit) and self.model.peft_config["default"].quantization_awareness:
+                    bias = target.base_layer.bias is not None
+                    base_layer = QALinear4bit(
+                        target.in_features,
+                        target.out_features,
+                        bias=bias,
+                        compute_dtype=target.base_layer.compute_dtype,
+                        compress_statistics=target.base_layer.weight.compress_statistics,
+                        quant_type=target.base_layer.weight.quant_type,
+                        device=target.base_layer.weight.device,
+                    )
+                    
+                self._replace_module(parent, target_name, base_layer, target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])

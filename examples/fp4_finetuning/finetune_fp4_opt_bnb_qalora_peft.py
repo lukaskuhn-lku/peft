@@ -132,11 +132,6 @@ for k, v in dtypes.items():
 
 """### Training"""
 
-
-data = load_dataset("Abirate/english_quotes")
-data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
-
-
 data = load_dataset("Abirate/english_quotes")
 data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
@@ -146,8 +141,8 @@ trainer = transformers.Trainer(
     args=transformers.TrainingArguments(
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,
-        warmup_steps=10,
-        max_steps=20,
+        warmup_steps=0,
+        max_steps=2,
         learning_rate=3e-4,
         fp16=True,
         logging_steps=1,
@@ -190,6 +185,8 @@ batch = tokenizer("Two things are infinite: ", return_tensors="pt")
 
 model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
 model.eval()
+model = model.merge_and_unload()
+
 with torch.cuda.amp.autocast():
     output_tokens = model.generate(**batch, max_new_tokens=50)
 
