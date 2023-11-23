@@ -241,14 +241,17 @@ if is_bnb_4bit_available():
                 if self.qa:
                     shape = self.base_layer.weight.quant_state[1]
                     # Create full size c and full size lora (dimensions of base_layer)
-                    c = (127 / weight.quant_state[0]).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
+                    c = (127. / weight.quant_state[0]).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
                     lora_fullsize = lora_data.view(-1).view(shape[0], shape[1]//self.block_size).unsqueeze(2).expand(-1, -1, 64).reshape(shape[0], shape[1])
 
                     w_dequantized = bnb.functional.dequantize_4bit(weight.data, weight.quant_state, quant_type=kwargs['quant_type'])
 
                     # Implementation of QLora quantization technique with QALora awareness
-                    w_and_lora = (w_dequantized + lora_fullsize) * c
-                    w_data = torch.round(w_and_lora)
+                    #w_and_lora = (w_dequantized + lora_fullsize) * c
+                    lora_quantized = torch.round(lora_fullsize * c)
+
+                    w_data = torch.round(w_dequantized * c) + lora_quantized
+                    w_data = w_data.to(torch.int8)
                 else:
                     w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
 

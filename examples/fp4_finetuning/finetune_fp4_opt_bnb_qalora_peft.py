@@ -26,7 +26,7 @@ model = AutoModelForCausalLM.from_pretrained(
         llm_int8_has_fp16_weight=False,
         bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=False, # Double quantization is not supported for now.
-        bnb_4bit_quant_type="nf4",
+        bnb_4bit_quant_type="fp4",
     ),
     torch_dtype=torch.float16,
 )
@@ -105,8 +105,8 @@ trainer = transformers.Trainer(
     args=transformers.TrainingArguments(
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,
-        warmup_steps=10,
-        max_steps=20,
+        warmup_steps=0,
+        max_steps=5,
         learning_rate=3e-4,
         fp16=True,
         logging_steps=1,
